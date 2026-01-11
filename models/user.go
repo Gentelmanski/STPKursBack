@@ -9,8 +9,10 @@ type User struct {
 	Username     string    `gorm:"unique;not null" json:"username"`
 	Email        string    `gorm:"unique;not null" json:"email"`
 	PasswordHash string    `gorm:"not null" json:"-"`
-	Role         string    `gorm:"not null;check:role IN ('user', 'admin')" json:"role"`
+	Role         string    `gorm:"not null;default:'user';check:role IN ('user', 'admin')" json:"role"`
 	AvatarURL    string    `json:"avatar_url"`
+	IsBlocked    bool      `gorm:"default:false" json:"is_blocked"`
+	LastOnline   time.Time `json:"last_online"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
