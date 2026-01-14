@@ -394,24 +394,17 @@ func CancelParticipation(c *gin.Context) {
 }
 
 func GetEventsByUser(c *gin.Context) {
-
-	query := database.DB.Model(&models.Event{}).
-		Preload("Creator").
-		Preload("Tags").
-		Where("is_active = ?", true)
-
 	userID, _ := c.Get("user_id")
 
 	var events []models.Event
-	if err := database.DB.Where("creator_id = ?", userID).
+
+	// Загружаем мероприятия, созданные именно этим пользователем
+	if err := database.DB.
+		Preload("Creator").
 		Preload("Tags").
+		Where("creator_id = ? AND is_active = ?", userID, true).
 		Order("created_at DESC").
 		Find(&events).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	if err := query.Order("created_at DESC").Find(&events).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
