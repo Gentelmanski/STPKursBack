@@ -324,16 +324,33 @@ func ParticipateEvent(c *gin.Context) {
 		}
 	}
 
-	participant := models.EventParticipant{
-		EventID:  uint(eventID),
-		UserID:   userID.(uint),
-		Status:   "going",
-		JoinedAt: time.Now(),
-	}
+	// Проверяем, существует ли уже запись о участии
+	var existingParticipant models.EventParticipant
+	result := database.DB.Where("event_id = ? AND user_id = ?", eventID, userID).
+		First(&existingParticipant)
 
-	if err := database.DB.Create(&participant).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	if result.Error == nil {
+		// Запись уже существует - обновляем статус
+		existingParticipant.Status = "going"
+		existingParticipant.JoinedAt = time.Now()
+
+		if err := database.DB.Save(&existingParticipant).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		// Записи нет - создаем новую
+		participant := models.EventParticipant{
+			EventID:  uint(eventID),
+			UserID:   userID.(uint),
+			Status:   "going",
+			JoinedAt: time.Now(),
+		}
+
+		if err := database.DB.Create(&participant).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	// Создаем уведомление для создателя мероприятия
@@ -355,8 +372,19 @@ func CancelParticipation(c *gin.Context) {
 	eventID, _ := strconv.Atoi(c.Param("id"))
 	userID, _ := c.Get("user_id")
 
-	if err := database.DB.Where("event_id = ? AND user_id = ?", eventID, userID).
-		Delete(&models.EventParticipant{}).Error; err != nil {
+	// Вместо удаления записи, меняем статус на 'declined'
+	var participant models.EventParticipant
+	result := database.DB.Where("event_id = ? AND user_id = ?", eventID, userID).
+		First(&participant)
+
+	if result.Error != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Participation not found"})
+		return
+	}
+
+	participant.Status = "declined"
+
+	if err := database.DB.Save(&participant).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
