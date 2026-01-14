@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gosimple/slug"
+	"gorm.io/gorm"
 )
 
 type CreateEventRequest struct {
@@ -402,7 +403,7 @@ func GetEventsByUser(c *gin.Context) {
 	userID, _ := c.Get("user_id")
 
 	var events []models.Event
-	if err := database.DB.Where("creator_id = ? AND is_active = ?", userID, true).
+	if err := database.DB.Where("creator_id = ?", userID).
 		Preload("Tags").
 		Order("created_at DESC").
 		Find(&events).Error; err != nil {
@@ -423,8 +424,12 @@ func GetEventsByUser(c *gin.Context) {
 		}
 
 		var coords Coordinates
-		database.DB.Raw("SELECT ST_Y(location::geometry) as latitude, ST_X(location::geometry) as longitude FROM events WHERE id = ?", events[i].ID).
-			Scan(&coords)
+		database.DB.Raw(`
+            SELECT 
+                ST_Y(ST_Transform(location::geometry, 4326)) as latitude,
+                ST_X(ST_Transform(location::geometry, 4326)) as longitude 
+            FROM events WHERE id = ?
+        `, events[i].ID).Scan(&coords)
 
 		events[i].Latitude = coords.Latitude
 		events[i].Longitude = coords.Longitude
@@ -443,16 +448,47 @@ func GetEventsByUser(c *gin.Context) {
 func GetParticipatedEvents(c *gin.Context) {
 	userID, _ := c.Get("user_id")
 
-	var events []models.Event
-	if err := database.DB.Joins("JOIN event_participants ON events.id = event_participants.event_id").
-		Where("event_participants.user_id = ? AND events.is_active = ?", userID, true).
-		Preload("Creator").
-		Preload("Tags").
-		Order("events.created_at DESC").
-		Find(&events).Error; err != nil {
+	var participations []models.EventParticipant
+	if err := database.DB.Where("user_id = ? AND status = 'going'", userID).
+		Preload("Event", func(db *gorm.DB) *gorm.DB {
+			return db.Where("is_active = ?", true).
+				Preload("Creator").
+				Preload("Tags")
+		}).
+		Order("joined_at DESC").
+		Find(&participations).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, events)
+	// Преобразуем координаты для каждого мероприятия
+	for i := range participations {
+		// Проверяем, что Event был загружен (ID не равен 0)
+		if participations[i].Event.ID != 0 {
+			type Coordinates struct {
+				Latitude  float64
+				Longitude float64
+			}
+
+			var coords Coordinates
+			database.DB.Raw(`
+				SELECT 
+					ST_Y(ST_Transform(location::geometry, 4326)) as latitude,
+					ST_X(ST_Transform(location::geometry, 4326)) as longitude 
+				FROM events WHERE id = ?
+			`, participations[i].Event.ID).Scan(&coords)
+
+			participations[i].Event.Latitude = coords.Latitude
+			participations[i].Event.Longitude = coords.Longitude
+
+			// Подсчет участников
+			var participantsCount int64
+			database.DB.Model(&models.EventParticipant{}).
+				Where("event_id = ? AND status = 'going'", participations[i].Event.ID).
+				Count(&participantsCount)
+			participations[i].Event.ParticipantsCount = int(participantsCount)
+		}
+	}
+
+	c.JSON(http.StatusOK, participations)
 }

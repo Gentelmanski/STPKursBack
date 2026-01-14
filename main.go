@@ -1,3 +1,4 @@
+// main.go
 package main
 
 import (
@@ -41,7 +42,7 @@ func main() {
 		// Event routes
 		auth.GET("/events", handlers.GetEvents)
 		auth.POST("/events", handlers.CreateEvent)
-		auth.POST("/events/filter", handlers.FilterEvents) // Добавьте эту строку
+		auth.POST("/events/filter", handlers.FilterEvents)
 
 		// Event-specific routes
 		event := auth.Group("/events/:id")
@@ -71,27 +72,28 @@ func main() {
 		auth.PUT("/notifications/:id/read", handlers.MarkNotificationAsRead)
 		auth.POST("/notifications/mark-all-read", handlers.MarkAllNotificationsAsRead)
 
-		// User dashboard routes (защищенные по роли)
-		user := auth.Group("")
-		user.Use(middleware.RoleMiddleware("user", "admin"))
+		// User dashboard routes - ОДИН раз!
+		// Используем RoleMiddleware для проверки роли
+		userGroup := auth.Group("")
+		userGroup.Use(middleware.RoleMiddleware("user", "admin"))
 		{
-			user.GET("/user/dashboard", handlers.GetUserDashboard)
+			userGroup.GET("/user/dashboard", handlers.GetUserDashboard)
 		}
 
 		// Admin routes
-		admin := auth.Group("")
-		admin.Use(middleware.RoleMiddleware("admin"))
+		adminGroup := auth.Group("")
+		adminGroup.Use(middleware.RoleMiddleware("admin"))
 		{
-			admin.GET("/admin/dashboard", handlers.GetAdminDashboard)
-			admin.GET("/admin/events", handlers.AdminGetEvents)
-			admin.PUT("/admin/events/:eventId/verify", handlers.AdminVerifyEvent)
-			admin.PUT("/admin/events/:eventId/reject", handlers.AdminRejectEvent)
-			admin.DELETE("/admin/events/:eventId", handlers.AdminDeleteEvent)
-			admin.GET("/admin/users", handlers.AdminGetUsers)
-			admin.PUT("/admin/users/:userId/block", handlers.AdminBlockUser)
-			admin.PUT("/admin/users/:userId/unblock", handlers.AdminUnblockUser)
-			admin.DELETE("/admin/comments/:commentId", handlers.AdminDeleteComment)
-			admin.GET("/admin/statistics", handlers.AdminGetStatistics)
+			adminGroup.GET("/admin/dashboard", handlers.GetAdminDashboard)
+			adminGroup.GET("/admin/events", handlers.AdminGetEvents)
+			adminGroup.PUT("/admin/events/:eventId/verify", handlers.AdminVerifyEvent)
+			adminGroup.PUT("/admin/events/:eventId/reject", handlers.AdminRejectEvent)
+			adminGroup.DELETE("/admin/events/:eventId", handlers.AdminDeleteEvent)
+			adminGroup.GET("/admin/users", handlers.AdminGetUsers)
+			adminGroup.PUT("/admin/users/:userId/block", handlers.AdminBlockUser)
+			adminGroup.PUT("/admin/users/:userId/unblock", handlers.AdminUnblockUser)
+			adminGroup.DELETE("/admin/comments/:commentId", handlers.AdminDeleteComment)
+			adminGroup.GET("/admin/statistics", handlers.AdminGetStatistics)
 		}
 	}
 

@@ -21,6 +21,7 @@ func GetUserDashboard(c *gin.Context) {
 		CreatedEvents      int64 `json:"created_events"`
 		ParticipatedEvents int64 `json:"participated_events"`
 		Comments           int64 `json:"comments"`
+		Rating             int64 `json:"rating"`
 	}
 
 	// Количество созданных мероприятий
@@ -37,6 +38,18 @@ func GetUserDashboard(c *gin.Context) {
 	database.DB.Model(&models.Comment{}).
 		Where("user_id = ? AND is_deleted = ?", userID, false).
 		Count(&stats.Comments)
+
+	// Рейтинг (можно вычислить как сумму голосов за комментарии)
+	var rating struct {
+		TotalScore int64
+	}
+	database.DB.Raw(`
+        SELECT COALESCE(SUM(score), 0) as total_score 
+        FROM comments 
+        WHERE user_id = ? AND is_deleted = false
+    `, userID).Scan(&rating)
+
+	stats.Rating = rating.TotalScore
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Welcome to User Dashboard",

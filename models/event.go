@@ -59,7 +59,8 @@ type EventParticipant struct {
 	Status   string    `gorm:"not null;default:'going';check:status IN ('going','maybe','declined')" json:"status"`
 	JoinedAt time.Time `json:"joined_at"`
 
-	User User `gorm:"foreignKey:UserID" json:"user"`
+	User  User  `gorm:"foreignKey:UserID" json:"user"`
+	Event Event `gorm:"foreignKey:EventID" json:"event"`
 }
 
 type Comment struct {
