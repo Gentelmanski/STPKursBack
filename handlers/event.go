@@ -360,6 +360,12 @@ func CancelParticipation(c *gin.Context) {
 }
 
 func GetEventsByUser(c *gin.Context) {
+
+	query := database.DB.Model(&models.Event{}).
+		Preload("Creator").
+		Preload("Tags").
+		Where("is_active = ?", true)
+
 	userID, _ := c.Get("user_id")
 
 	var events []models.Event
@@ -369,6 +375,33 @@ func GetEventsByUser(c *gin.Context) {
 		Find(&events).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	if err := query.Order("created_at DESC").Find(&events).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Преобразуем PostGIS geometry в latitude/longitude
+	for i := range events {
+		type Coordinates struct {
+			Latitude  float64
+			Longitude float64
+		}
+
+		var coords Coordinates
+		database.DB.Raw("SELECT ST_Y(location::geometry) as latitude, ST_X(location::geometry) as longitude FROM events WHERE id = ?", events[i].ID).
+			Scan(&coords)
+
+		events[i].Latitude = coords.Latitude
+		events[i].Longitude = coords.Longitude
+
+		// Подсчет участников
+		var participantsCount int64
+		database.DB.Model(&models.EventParticipant{}).
+			Where("event_id = ? AND status = 'going'", events[i].ID).
+			Count(&participantsCount)
+		events[i].ParticipantsCount = int(participantsCount)
 	}
 
 	c.JSON(http.StatusOK, events)
