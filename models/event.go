@@ -15,6 +15,7 @@ type Event struct {
 	Type            string    `gorm:"not null;check:type IN ('concert','exhibition','meetup','workshop','sport','festival','other')" json:"type"`
 	MaxParticipants *int      `json:"max_participants"`
 	Price           float64   `json:"price"`
+	Address         string    `gorm:"type:text" json:"address"`
 	IsVerified      bool      `gorm:"default:false" json:"is_verified"`
 	IsActive        bool      `gorm:"default:true" json:"is_active"`
 	CreatorID       uint      `json:"creator_id"`

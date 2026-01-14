@@ -24,6 +24,7 @@ type CreateEventRequest struct {
 	MaxParticipants *int      `json:"max_participants"`
 	Price           float64   `json:"price"`
 	Tags            []string  `json:"tags"`
+	Address         string    `json:"address"`
 }
 
 type UpdateEventRequest struct {
@@ -166,6 +167,7 @@ func CreateEvent(c *gin.Context) {
 		Type:            req.Type,
 		MaxParticipants: req.MaxParticipants,
 		Price:           req.Price,
+		Address:         req.Address,
 		CreatorID:       userID.(uint),
 		IsVerified:      false,
 		IsActive:        true,
@@ -208,6 +210,9 @@ func CreateEvent(c *gin.Context) {
 		}
 		database.DB.Create(&notification)
 	}
+
+	event.Latitude = req.Latitude
+	event.Longitude = req.Longitude
 
 	c.JSON(http.StatusCreated, event)
 }
