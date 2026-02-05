@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// test
 type EventController struct {
 	eventService interfaces.EventService
 }

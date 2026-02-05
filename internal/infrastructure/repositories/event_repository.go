@@ -2,8 +2,6 @@ package repositories
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"time"
 
 	"auth-system/internal/application/interfaces"
@@ -22,225 +20,101 @@ func NewEventRepository(db *gorm.DB) interfaces.EventRepository {
 }
 
 func (r *EventRepository) Create(ctx context.Context, event *entities.Event) error {
-	// Используем raw SQL для вставки с PostGIS
-	query := `
-		INSERT INTO events (
-			title, description, event_date, location, type, 
-			max_participants, price, address, is_verified, 
-			is_active, creator_id, created_at, updated_at
-		) VALUES ($1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326), $6, $7, $8, $9, $10, $11, $12, $13, $14)
-		RETURNING id
-	`
-
-	return r.db.WithContext(ctx).Raw(query,
-		event.Title,
-		event.Description,
-		event.EventDate,
-		event.Longitude, // ST_MakePoint принимает longitude first
-		event.Latitude,
-		event.Type,
-		event.MaxParticipants,
-		event.Price,
-		event.Address,
-		event.IsVerified,
-		event.IsActive,
-		event.CreatorID,
-		event.CreatedAt,
-		event.UpdatedAt,
-	).Scan(&event.ID).Error
+	return r.db.WithContext(ctx).Create(event).Error
 }
 
 func (r *EventRepository) FindByID(ctx context.Context, id uint) (*entities.Event, error) {
 	var event entities.Event
 
-	// Основной запрос
-	query := `
-        SELECT 
-            e.*,
-            ST_Y(e.location::geometry) as latitude,
-            ST_X(e.location::geometry) as longitude,
-            u.id as creator_id,
-            u.username,
-            u.email,
-            u.role,
-            u.avatar_url,
-            COUNT(DISTINCT ep.id) as participants_count
-        FROM events e
-        LEFT JOIN users u ON e.creator_id = u.id
-        LEFT JOIN event_participants ep ON e.id = ep.event_id AND ep.status = 'going'
-        WHERE e.id = ? AND e.is_active = true
-        GROUP BY e.id, u.id
-    `
-
-	row := r.db.WithContext(ctx).Raw(query, id).Row()
-
-	var creatorID uint
-	var username, email, role, avatarURL *string
-	var latitude, longitude float64
-
-	err := row.Scan(
-		&event.ID,
-		&event.Title,
-		&event.Description,
-		&event.EventDate,
-		// location пропускаем
-		&event.Type,
-		&event.MaxParticipants,
-		&event.Price,
-		&event.Address,
-		&event.IsVerified,
-		&event.IsActive,
-		&creatorID,
-		&event.CreatedAt,
-		&event.UpdatedAt,
-		&latitude,
-		&longitude,
-		&creatorID,
-		&username,
-		&email,
-		&role,
-		&avatarURL,
-		&event.ParticipantsCount,
-	)
+	// Загружаем базовую информацию о событии
+	err := r.db.WithContext(ctx).
+		Table("events").
+		Select("events.*, users.username, users.email, users.role, users.avatar_url").
+		Joins("LEFT JOIN users ON events.creator_id = users.id").
+		Where("events.id = ?", id).
+		First(&event).Error
 
 	if err != nil {
 		return nil, err
 	}
 
-	event.Latitude = latitude
-	event.Longitude = longitude
+	// Ручной расчет количества участников
+	var participantsCount int64
+	r.db.WithContext(ctx).Table("event_participants").
+		Where("event_id = ? AND status = 'going'", id).
+		Count(&participantsCount)
+	event.ParticipantsCount = int(participantsCount)
 
-	// Заполняем информацию о создателе
-	if username != nil {
-		event.Creator = entities.User{
-			ID:        creatorID,
-			Username:  *username,
-			Email:     *email,
-			Role:      *role,
-			AvatarURL: *avatarURL,
-		}
+	// Преобразуем координаты из PostGIS
+	var coords struct {
+		Latitude  float64
+		Longitude float64
 	}
 
-	// Загружаем теги
-	var tags []entities.Tag
-	err = r.db.WithContext(ctx).
-		Table("tags").
-		Select("tags.*").
-		Joins("JOIN event_tags ON tags.id = event_tags.tag_id").
-		Where("event_tags.event_id = ?", id).
-		Find(&tags).Error
-	if err == nil {
-		event.Tags = tags
-	}
+	r.db.WithContext(ctx).Raw(`
+		SELECT 
+			ST_Y(location::geometry) as latitude,
+			ST_X(location::geometry) as longitude 
+		FROM events WHERE id = ?
+	`, id).Scan(&coords)
+
+	event.Latitude = coords.Latitude
+	event.Longitude = coords.Longitude
 
 	return &event, nil
 }
 
 func (r *EventRepository) FindAll(ctx context.Context, filter map[string]interface{}) ([]entities.Event, error) {
-	// Базовый запрос с COUNT DISTINCT по user_id (не id)
-	query := `
-        SELECT 
-            e.*,
-            ST_Y(e.location::geometry) as latitude,
-            ST_X(e.location::geometry) as longitude,
-            u.id as "creator__id",
-            u.username as "creator__username",
-            u.email as "creator__email",
-            u.role as "creator__role",
-            u.avatar_url as "creator__avatar_url",
-            COUNT(DISTINCT ep.user_id) as participants_count
-        FROM events e
-        LEFT JOIN users u ON e.creator_id = u.id
-        LEFT JOIN event_participants ep ON e.id = ep.event_id AND ep.status = 'going'
-        WHERE e.is_active = true
-    `
-
-	// Добавляем фильтры
-	whereClauses := []string{}
-	params := []interface{}{}
-	paramCount := 1
-
-	if types, ok := filter["type"]; ok {
-		if typeSlice, ok := types.([]string); ok && len(typeSlice) > 0 {
-			placeholders := []string{}
-			for _, t := range typeSlice {
-				placeholders = append(placeholders, fmt.Sprintf("$%d", paramCount))
-				params = append(params, t)
-				paramCount++
-			}
-			whereClauses = append(whereClauses, fmt.Sprintf("e.type IN (%s)", strings.Join(placeholders, ",")))
-		}
-	}
-
-	if date, ok := filter["date"]; ok {
-		if dateTime, ok := date.(time.Time); ok && !dateTime.IsZero() {
-			whereClauses = append(whereClauses, fmt.Sprintf("DATE(e.event_date) = DATE($%d)", paramCount))
-			params = append(params, dateTime)
-			paramCount++
-		}
-	}
-
-	// Добавляем WHERE условия
-	if len(whereClauses) > 0 {
-		query += " AND " + strings.Join(whereClauses, " AND ")
-	}
-
-	// Группировка и сортировка
-	query += " GROUP BY e.id, u.id ORDER BY e.created_at DESC"
-
-	// Выполняем запрос через Raw Scan
-	rows, err := r.db.WithContext(ctx).Raw(query, params...).Rows()
-	if err != nil {
-		return nil, fmt.Errorf("query error: %w", err)
-	}
-	defer rows.Close()
-
 	var events []entities.Event
 
-	for rows.Next() {
-		var event entities.Event
-		var creator entities.User
-		var latitude, longitude float64
-		var participantsCount int
+	// Базовый запрос
+	query := r.db.WithContext(ctx).
+		Table("events").
+		Select("events.*, users.username, users.email, users.role, users.avatar_url").
+		Joins("LEFT JOIN users ON events.creator_id = users.id").
+		Where("events.is_active = ?", true)
 
-		// Сканируем данные с использованием правильных имен полей
-		err := rows.Scan(
-			&event.ID,
-			&event.Title,
-			&event.Description,
-			&event.EventDate,
-			// location пропускаем - получаем lat/long отдельно
-			new(interface{}), // location field
-			&event.Type,
-			&event.MaxParticipants,
-			&event.Price,
-			&event.Address,
-			&event.IsVerified,
-			&event.IsActive,
-			&event.CreatorID,
-			&event.CreatedAt,
-			&event.UpdatedAt,
-			&latitude,
-			&longitude,
-			&creator.ID,
-			&creator.Username,
-			&creator.Email,
-			&creator.Role,
-			&creator.AvatarURL,
-			&participantsCount,
-		)
-
-		if err != nil {
-			fmt.Printf("Scan error: %v\n", err)
-			continue
+	// Фильтры
+	if types, ok := filter["type"]; ok {
+		query = query.Where("events.type IN ?", types)
+	}
+	if date, ok := filter["date"]; ok {
+		if !date.(time.Time).IsZero() {
+			startOfDay := date.(time.Time).Truncate(24 * time.Hour)
+			endOfDay := startOfDay.Add(24 * time.Hour)
+			query = query.Where("events.event_date BETWEEN ? AND ?", startOfDay, endOfDay)
 		}
+	}
 
-		event.Latitude = latitude
-		event.Longitude = longitude
-		event.Creator = creator
-		event.ParticipantsCount = participantsCount
+	// Получаем события
+	err := query.Order("events.created_at DESC").Find(&events).Error
+	if err != nil {
+		return nil, err
+	}
 
-		events = append(events, event)
+	// Для каждого события получаем дополнительные данные
+	for i := range events {
+		// Количество участников
+		var count int64
+		r.db.WithContext(ctx).Table("event_participants").
+			Where("event_id = ? AND status = 'going'", events[i].ID).
+			Count(&count)
+		events[i].ParticipantsCount = int(count)
+
+		// Координаты
+		var coords struct {
+			Latitude  float64
+			Longitude float64
+		}
+		r.db.WithContext(ctx).Raw(`
+			SELECT 
+				ST_Y(location::geometry) as latitude,
+				ST_X(location::geometry) as longitude 
+			FROM events WHERE id = ?
+		`, events[i].ID).Scan(&coords)
+
+		events[i].Latitude = coords.Latitude
+		events[i].Longitude = coords.Longitude
 	}
 
 	return events, nil
@@ -273,44 +147,11 @@ func (r *EventRepository) GetEventParticipants(ctx context.Context, eventID uint
 }
 
 func (r *EventRepository) Update(ctx context.Context, event *entities.Event) error {
-	// Обновляем только негеографические поля
-	// Для обновления location нужно использовать отдельный запрос с PostGIS
-	updates := map[string]interface{}{
-		"title":            event.Title,
-		"description":      event.Description,
-		"event_date":       event.EventDate,
-		"type":             event.Type,
-		"max_participants": event.MaxParticipants,
-		"price":            event.Price,
-		"address":          event.Address,
-		"is_verified":      event.IsVerified,
-		"is_active":        event.IsActive,
-		"updated_at":       time.Now(),
-	}
-
-	// Если нужно обновить координаты
-	if event.Latitude != 0 && event.Longitude != 0 {
-		// Используем raw SQL для обновления location
-		err := r.db.WithContext(ctx).Exec(`
-			UPDATE events 
-			SET location = ST_SetSRID(ST_MakePoint(?, ?), 4326)
-			WHERE id = ?`,
-			event.Longitude, event.Latitude, event.ID).Error
-		if err != nil {
-			return err
-		}
-	}
-
-	return r.db.WithContext(ctx).Model(&entities.Event{}).
-		Where("id = ?", event.ID).
-		Updates(updates).Error
+	return r.db.WithContext(ctx).Save(event).Error
 }
 
 func (r *EventRepository) Delete(ctx context.Context, id uint) error {
-	return r.db.WithContext(ctx).
-		Model(&entities.Event{}).
-		Where("id = ?", id).
-		Update("is_active", false).Error
+	return r.db.WithContext(ctx).Delete(&entities.Event{}, id).Error
 }
 
 func (r *EventRepository) GetByCreator(ctx context.Context, creatorID uint) ([]entities.Event, error) {
@@ -327,79 +168,16 @@ func (r *EventRepository) GetByCreator(ctx context.Context, creatorID uint) ([]e
 func (r *EventRepository) GetParticipatedEvents(ctx context.Context, userID uint) ([]entities.Event, error) {
 	var events []entities.Event
 
-	// Простой запрос через JOIN
-	query := `
-        SELECT e.*,
-               ST_Y(e.location::geometry) as latitude,
-               ST_X(e.location::geometry) as longitude,
-               u.id as "creator__id",
-               u.username as "creator__username",
-               u.email as "creator__email",
-               u.role as "creator__role",
-               u.avatar_url as "creator__avatar_url"
-        FROM events e
-        JOIN event_participants ep ON e.id = ep.event_id 
-        LEFT JOIN users u ON e.creator_id = u.id
-        WHERE ep.user_id = ? AND ep.status = 'going' 
-          AND e.is_active = true
-        ORDER BY ep.joined_at DESC
-    `
+	// Получаем мероприятия, в которых участвует пользователь
+	err := r.db.WithContext(ctx).
+		Joins("JOIN event_participants ep ON events.id = ep.event_id").
+		Preload("Creator").
+		Preload("Tags").
+		Where("ep.user_id = ? AND ep.status = 'going' AND events.is_active = ?", userID, true).
+		Order("ep.joined_at DESC").
+		Find(&events).Error
 
-	rows, err := r.db.WithContext(ctx).Raw(query, userID).Rows()
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var event entities.Event
-		var creator entities.User
-		var latitude, longitude float64
-
-		err := rows.Scan(
-			&event.ID,
-			&event.Title,
-			&event.Description,
-			&event.EventDate,
-			new(interface{}), // location
-			&event.Type,
-			&event.MaxParticipants,
-			&event.Price,
-			&event.Address,
-			&event.IsVerified,
-			&event.IsActive,
-			&event.CreatorID,
-			&event.CreatedAt,
-			&event.UpdatedAt,
-			&latitude,
-			&longitude,
-			&creator.ID,
-			&creator.Username,
-			&creator.Email,
-			&creator.Role,
-			&creator.AvatarURL,
-		)
-
-		if err != nil {
-			fmt.Printf("Scan error in GetParticipatedEvents: %v\n", err)
-			continue
-		}
-
-		event.Latitude = latitude
-		event.Longitude = longitude
-		event.Creator = creator
-
-		// Получаем количество участников
-		var count int64
-		r.db.WithContext(ctx).Table("event_participants").
-			Where("event_id = ? AND status = 'going'", event.ID).
-			Count(&count)
-		event.ParticipantsCount = int(count)
-
-		events = append(events, event)
-	}
-
-	return events, nil
+	return events, err
 }
 
 func (r *EventRepository) VerifyEvent(ctx context.Context, eventID uint) error {

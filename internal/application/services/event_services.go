@@ -9,6 +9,8 @@ import (
 	"auth-system/internal/application/dto"
 	appInterfaces "auth-system/internal/application/interfaces"
 	"auth-system/internal/domain/entities"
+
+	"github.com/gosimple/slug"
 )
 
 type EventService struct {
@@ -43,16 +45,19 @@ func (s *EventService) CreateEvent(ctx context.Context, req dto.CreateEventReque
 		UpdatedAt:       time.Now(),
 	}
 
+	// Создаем теги отдельно
+	tags := make([]entities.Tag, len(req.Tags))
+	for i, tagName := range req.Tags {
+		tags[i] = entities.Tag{
+			Name:      tagName,
+			Slug:      slug.Make(tagName),
+			CreatedAt: time.Now(),
+		}
+	}
+	event.Tags = tags
+
 	if err := s.eventRepo.Create(ctx, event); err != nil {
 		return nil, err
-	}
-
-	// Добавляем теги
-	if len(req.Tags) > 0 {
-		if err := s.eventRepo.AddTags(ctx, event.ID, req.Tags); err != nil {
-			// Логируем ошибку, но не прерываем выполнение
-			fmt.Printf("Failed to add tags: %v\n", err)
-		}
 	}
 
 	// Notify admins
@@ -70,13 +75,7 @@ func (s *EventService) CreateEvent(ctx context.Context, req dto.CreateEventReque
 		}
 	}
 
-	// Получаем созданное событие со всеми данными
-	createdEvent, err := s.eventRepo.FindByID(ctx, event.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.eventToDTO(createdEvent), nil
+	return s.eventToDTO(event), nil
 }
 
 func (s *EventService) GetEvents(ctx context.Context, filter dto.EventFilter) ([]dto.EventResponse, error) {
@@ -278,29 +277,26 @@ func (s *EventService) eventToDTO(event *entities.Event) *dto.EventResponse {
 		}
 	}
 
-	// Создаем UserShort (обрабатываем nil Creator)
-	userShort := dto.UserShort{
-		ID:       event.Creator.ID,
-		Username: event.Creator.Username,
-		Email:    event.Creator.Email,
-		Role:     event.Creator.Role,
-	}
-
 	return &dto.EventResponse{
-		ID:                event.ID,
-		Title:             event.Title,
-		Description:       event.Description,
-		EventDate:         event.EventDate,
-		Latitude:          event.Latitude,
-		Longitude:         event.Longitude,
-		Type:              event.Type,
-		MaxParticipants:   event.MaxParticipants,
-		Price:             event.Price,
-		Address:           event.Address,
-		IsVerified:        event.IsVerified,
-		IsActive:          event.IsActive,
-		CreatorID:         event.CreatorID,
-		Creator:           userShort,
+		ID:              event.ID,
+		Title:           event.Title,
+		Description:     event.Description,
+		EventDate:       event.EventDate,
+		Latitude:        event.Latitude,
+		Longitude:       event.Longitude,
+		Type:            event.Type,
+		MaxParticipants: event.MaxParticipants,
+		Price:           event.Price,
+		Address:         event.Address,
+		IsVerified:      event.IsVerified,
+		IsActive:        event.IsActive,
+		CreatorID:       event.CreatorID,
+		Creator: dto.UserShort{
+			ID:       event.Creator.ID,
+			Username: event.Creator.Username,
+			Email:    event.Creator.Email,
+			Role:     event.Creator.Role,
+		},
 		ParticipantsCount: event.ParticipantsCount,
 		CreatedAt:         event.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:         event.UpdatedAt.Format(time.RFC3339),

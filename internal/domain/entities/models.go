@@ -20,7 +20,6 @@ type EventMedia struct {
 	FileURL    string    `json:"file_url"`
 	FileType   string    `json:"file_type"`
 	OrderIndex int       `json:"order_index"`
-	UploadedAt time.Time `json:"uploaded_at"`
 	CreatedAt  time.Time `json:"created_at"`
 }
 
@@ -29,10 +28,9 @@ type EventParticipant struct {
 	UserID   uint      `json:"user_id"`
 	Status   string    `json:"status"`
 	JoinedAt time.Time `json:"joined_at"`
-	User     User      `json:"user" gorm:"-"`
-	Event    Event     `json:"event" gorm:"-"`
+	User     User      `json:"user"`
+	Event    Event     `json:"event"`
 }
-
 type CommentVote struct {
 	UserID    uint      `json:"user_id"`
 	CommentID uint      `json:"comment_id"`
