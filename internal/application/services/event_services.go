@@ -9,8 +9,6 @@ import (
 	"auth-system/internal/application/dto"
 	appInterfaces "auth-system/internal/application/interfaces"
 	"auth-system/internal/domain/entities"
-
-	"github.com/gosimple/slug"
 )
 
 type EventService struct {
@@ -45,19 +43,16 @@ func (s *EventService) CreateEvent(ctx context.Context, req dto.CreateEventReque
 		UpdatedAt:       time.Now(),
 	}
 
-	// Создаем теги отдельно
-	tags := make([]entities.Tag, len(req.Tags))
-	for i, tagName := range req.Tags {
-		tags[i] = entities.Tag{
-			Name:      tagName,
-			Slug:      slug.Make(tagName),
-			CreatedAt: time.Now(),
-		}
-	}
-	event.Tags = tags
-
 	if err := s.eventRepo.Create(ctx, event); err != nil {
 		return nil, err
+	}
+
+	// Добавляем теги
+	if len(req.Tags) > 0 {
+		if err := s.eventRepo.AddTags(ctx, event.ID, req.Tags); err != nil {
+			// Логируем ошибку, но не прерываем выполнение
+			fmt.Printf("Failed to add tags: %v\n", err)
+		}
 	}
 
 	// Notify admins
@@ -75,7 +70,13 @@ func (s *EventService) CreateEvent(ctx context.Context, req dto.CreateEventReque
 		}
 	}
 
-	return s.eventToDTO(event), nil
+	// Получаем созданное событие со всеми данными
+	createdEvent, err := s.eventRepo.FindByID(ctx, event.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.eventToDTO(createdEvent), nil
 }
 
 func (s *EventService) GetEvents(ctx context.Context, filter dto.EventFilter) ([]dto.EventResponse, error) {

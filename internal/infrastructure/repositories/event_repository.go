@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"auth-system/internal/application/interfaces"
@@ -20,7 +21,32 @@ func NewEventRepository(db *gorm.DB) interfaces.EventRepository {
 }
 
 func (r *EventRepository) Create(ctx context.Context, event *entities.Event) error {
-	return r.db.WithContext(ctx).Create(event).Error
+	// Используем raw SQL для вставки с PostGIS
+	query := `
+		INSERT INTO events (
+			title, description, event_date, location, type, 
+			max_participants, price, address, is_verified, 
+			is_active, creator_id, created_at, updated_at
+		) VALUES ($1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326), $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		RETURNING id
+	`
+
+	return r.db.WithContext(ctx).Raw(query,
+		event.Title,
+		event.Description,
+		event.EventDate,
+		event.Longitude, // ST_MakePoint принимает longitude first
+		event.Latitude,
+		event.Type,
+		event.MaxParticipants,
+		event.Price,
+		event.Address,
+		event.IsVerified,
+		event.IsActive,
+		event.CreatorID,
+		event.CreatedAt,
+		event.UpdatedAt,
+	).Scan(&event.ID).Error
 }
 
 func (r *EventRepository) FindByID(ctx context.Context, id uint) (*entities.Event, error) {
@@ -45,21 +71,41 @@ func (r *EventRepository) FindByID(ctx context.Context, id uint) (*entities.Even
 		Count(&participantsCount)
 	event.ParticipantsCount = int(participantsCount)
 
-	// Преобразуем координаты из PostGIS
-	var coords struct {
-		Latitude  float64
-		Longitude float64
-	}
-
-	r.db.WithContext(ctx).Raw(`
+	// Получаем координаты из PostGIS
+	err = r.db.WithContext(ctx).Raw(`
 		SELECT 
 			ST_Y(location::geometry) as latitude,
 			ST_X(location::geometry) as longitude 
-		FROM events WHERE id = ?
-	`, id).Scan(&coords)
+		FROM events WHERE id = ?`, id).Scan(&event).Error
 
-	event.Latitude = coords.Latitude
-	event.Longitude = coords.Longitude
+	if err != nil {
+		return nil, fmt.Errorf("failed to get coordinates: %w", err)
+	}
+
+	// Загружаем теги
+	var tags []entities.Tag
+	err = r.db.WithContext(ctx).
+		Table("tags").
+		Select("tags.*").
+		Joins("JOIN event_tags ON tags.id = event_tags.tag_id").
+		Where("event_tags.event_id = ?", id).
+		Find(&tags).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tags: %w", err)
+	}
+	event.Tags = tags
+
+	// Загружаем медиа
+	var media []entities.EventMedia
+	err = r.db.WithContext(ctx).
+		Table("event_media").
+		Where("event_id = ?", id).
+		Order("order_index").
+		Find(&media).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to get media: %w", err)
+	}
+	event.Media = media
 
 	return &event, nil
 }
@@ -76,11 +122,13 @@ func (r *EventRepository) FindAll(ctx context.Context, filter map[string]interfa
 
 	// Фильтры
 	if types, ok := filter["type"]; ok {
-		query = query.Where("events.type IN ?", types)
+		if typeSlice, ok := types.([]string); ok && len(typeSlice) > 0 {
+			query = query.Where("events.type IN ?", typeSlice)
+		}
 	}
 	if date, ok := filter["date"]; ok {
-		if !date.(time.Time).IsZero() {
-			startOfDay := date.(time.Time).Truncate(24 * time.Hour)
+		if dateTime, ok := date.(time.Time); ok && !dateTime.IsZero() {
+			startOfDay := dateTime.Truncate(24 * time.Hour)
 			endOfDay := startOfDay.Add(24 * time.Hour)
 			query = query.Where("events.event_date BETWEEN ? AND ?", startOfDay, endOfDay)
 		}
@@ -102,19 +150,37 @@ func (r *EventRepository) FindAll(ctx context.Context, filter map[string]interfa
 		events[i].ParticipantsCount = int(count)
 
 		// Координаты
-		var coords struct {
-			Latitude  float64
-			Longitude float64
-		}
-		r.db.WithContext(ctx).Raw(`
+		err = r.db.WithContext(ctx).Raw(`
 			SELECT 
 				ST_Y(location::geometry) as latitude,
 				ST_X(location::geometry) as longitude 
-			FROM events WHERE id = ?
-		`, events[i].ID).Scan(&coords)
+			FROM events WHERE id = ?`, events[i].ID).Scan(&events[i]).Error
+		if err != nil {
+			return nil, fmt.Errorf("failed to get coordinates for event %d: %w", events[i].ID, err)
+		}
 
-		events[i].Latitude = coords.Latitude
-		events[i].Longitude = coords.Longitude
+		// Теги
+		var tags []entities.Tag
+		err = r.db.WithContext(ctx).
+			Table("tags").
+			Select("tags.*").
+			Joins("JOIN event_tags ON tags.id = event_tags.tag_id").
+			Where("event_tags.event_id = ?", events[i].ID).
+			Find(&tags).Error
+		if err == nil {
+			events[i].Tags = tags
+		}
+
+		// Медиа
+		var media []entities.EventMedia
+		err = r.db.WithContext(ctx).
+			Table("event_media").
+			Where("event_id = ?", events[i].ID).
+			Order("order_index").
+			Find(&media).Error
+		if err == nil {
+			events[i].Media = media
+		}
 	}
 
 	return events, nil
@@ -147,11 +213,44 @@ func (r *EventRepository) GetEventParticipants(ctx context.Context, eventID uint
 }
 
 func (r *EventRepository) Update(ctx context.Context, event *entities.Event) error {
-	return r.db.WithContext(ctx).Save(event).Error
+	// Обновляем только негеографические поля
+	// Для обновления location нужно использовать отдельный запрос с PostGIS
+	updates := map[string]interface{}{
+		"title":            event.Title,
+		"description":      event.Description,
+		"event_date":       event.EventDate,
+		"type":             event.Type,
+		"max_participants": event.MaxParticipants,
+		"price":            event.Price,
+		"address":          event.Address,
+		"is_verified":      event.IsVerified,
+		"is_active":        event.IsActive,
+		"updated_at":       time.Now(),
+	}
+
+	// Если нужно обновить координаты
+	if event.Latitude != 0 && event.Longitude != 0 {
+		// Используем raw SQL для обновления location
+		err := r.db.WithContext(ctx).Exec(`
+			UPDATE events 
+			SET location = ST_SetSRID(ST_MakePoint(?, ?), 4326)
+			WHERE id = ?`,
+			event.Longitude, event.Latitude, event.ID).Error
+		if err != nil {
+			return err
+		}
+	}
+
+	return r.db.WithContext(ctx).Model(&entities.Event{}).
+		Where("id = ?", event.ID).
+		Updates(updates).Error
 }
 
 func (r *EventRepository) Delete(ctx context.Context, id uint) error {
-	return r.db.WithContext(ctx).Delete(&entities.Event{}, id).Error
+	return r.db.WithContext(ctx).
+		Model(&entities.Event{}).
+		Where("id = ?", id).
+		Update("is_active", false).Error
 }
 
 func (r *EventRepository) GetByCreator(ctx context.Context, creatorID uint) ([]entities.Event, error) {
