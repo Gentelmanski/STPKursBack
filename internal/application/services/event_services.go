@@ -278,26 +278,29 @@ func (s *EventService) eventToDTO(event *entities.Event) *dto.EventResponse {
 		}
 	}
 
+	// Создаем UserShort (обрабатываем nil Creator)
+	userShort := dto.UserShort{
+		ID:       event.Creator.ID,
+		Username: event.Creator.Username,
+		Email:    event.Creator.Email,
+		Role:     event.Creator.Role,
+	}
+
 	return &dto.EventResponse{
-		ID:              event.ID,
-		Title:           event.Title,
-		Description:     event.Description,
-		EventDate:       event.EventDate,
-		Latitude:        event.Latitude,
-		Longitude:       event.Longitude,
-		Type:            event.Type,
-		MaxParticipants: event.MaxParticipants,
-		Price:           event.Price,
-		Address:         event.Address,
-		IsVerified:      event.IsVerified,
-		IsActive:        event.IsActive,
-		CreatorID:       event.CreatorID,
-		Creator: dto.UserShort{
-			ID:       event.Creator.ID,
-			Username: event.Creator.Username,
-			Email:    event.Creator.Email,
-			Role:     event.Creator.Role,
-		},
+		ID:                event.ID,
+		Title:             event.Title,
+		Description:       event.Description,
+		EventDate:         event.EventDate,
+		Latitude:          event.Latitude,
+		Longitude:         event.Longitude,
+		Type:              event.Type,
+		MaxParticipants:   event.MaxParticipants,
+		Price:             event.Price,
+		Address:           event.Address,
+		IsVerified:        event.IsVerified,
+		IsActive:          event.IsActive,
+		CreatorID:         event.CreatorID,
+		Creator:           userShort,
 		ParticipantsCount: event.ParticipantsCount,
 		CreatedAt:         event.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:         event.UpdatedAt.Format(time.RFC3339),
