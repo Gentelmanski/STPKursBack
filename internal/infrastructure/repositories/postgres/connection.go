@@ -16,6 +16,8 @@ func ConnectDB(dsn string) *gorm.DB {
 		Logger: logger.Default.LogMode(logger.Info),
 		// Отключаем автоматическое создание внешних ключей
 		DisableForeignKeyConstraintWhenMigrating: true,
+		// Отключаем автоматическую миграцию при открытии соединения
+		SkipDefaultTransaction: true,
 	})
 
 	if err != nil {
@@ -38,17 +40,13 @@ func ConnectDB(dsn string) *gorm.DB {
 	return db
 }
 
-// SafeMigrate выполняет безопасную миграцию без потери данных
-func SafeMigrate(db *gorm.DB) error {
-	// Сначала проверяем наличие основных таблиц
-	requiredTables := []string{"users", "events", "tags", "comments"}
-
-	for _, table := range requiredTables {
-		if !db.Migrator().HasTable(table) {
-			log.Printf("Warning: Table %s does not exist. Creating...", table)
-		}
+// SimpleMigrate просто проверяет подключение
+func SafeMigratee(db *gorm.DB) error {
+	// Просто проверяем, что можем выполнить запрос
+	var result int
+	if err := db.Raw("SELECT 1").Scan(&result).Error; err != nil {
+		return err
 	}
-
-	// Выполняем безопасную миграцию
-	return Migrate(db)
+	log.Println("Database connection verified")
+	return nil
 }

@@ -221,10 +221,10 @@ func (s *CommentService) VoteComment(ctx context.Context, commentID, userID uint
 
 func (s *CommentService) commentToDTO(comment *entities.Comment) *dto.CommentResponse {
 	// Преобразуем ответы (реплики)
-	replies := make([]dto.CommentResponse, len(comment.Replies))
-	for i, reply := range comment.Replies {
-		replies[i] = *s.commentToDTO(&reply)
-	}
+	// replies := make([]dto.CommentResponse, len(comment.Replies))
+	// for i, reply := range comment.Replies {
+	// 	replies[i] = *s.commentToDTO(&reply)
+	// }
 
 	return &dto.CommentResponse{
 		ID:        comment.ID,
@@ -242,6 +242,6 @@ func (s *CommentService) commentToDTO(comment *entities.Comment) *dto.CommentRes
 			Email:    comment.User.Email,
 			Role:     comment.User.Role,
 		},
-		Replies: replies,
+		//Replies: replies,
 	}
 }

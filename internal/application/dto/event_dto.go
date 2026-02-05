@@ -52,6 +52,12 @@ type EventResponse struct {
 	Media             []Media   `json:"media"`
 }
 
+type EventFullResponse struct {
+	EventResponse
+	Participants []EventParticipantResponse `json:"participants"`
+	Comments     []CommentResponse          `json:"comments"`
+}
+
 type Tag struct {
 	ID   uint   `json:"id"`
 	Name string `json:"name"`

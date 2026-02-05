@@ -364,7 +364,6 @@ func (s *AdminService) GetPendingEvents(ctx context.Context) ([]dto.EventRespons
 	return response, nil
 }
 
-// Вспомогательный метод для преобразования события в DTO
 func (s *AdminService) eventToDTO(event *entities.Event) *dto.EventResponse {
 	// Преобразуем теги
 	tags := make([]dto.Tag, len(event.Tags))

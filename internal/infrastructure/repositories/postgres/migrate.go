@@ -6,42 +6,19 @@ import (
 	"gorm.io/gorm"
 )
 
-func Migrate(db *gorm.DB) error {
-	// Отключаем автоматическое создание внешних ключей и связей
-	db = db.Set("gorm:table_options", "ENGINE=InnoDB")
+// Migrate проверяет соединение
+func Migrate(db *gorm.DB) {
+	log.Println("Checking database structure...")
 
-	// Проверяем и добавляем только недостающие таблицы и поля
-	tables := []interface{}{
-		&UserModel{},
-		&EventModel{},
-		&TagModel{},
-		&EventTagModel{},
-		&EventMediaModel{},
-		&EventParticipantModel{},
-		&CommentModel{},
-		&CommentVoteModel{},
-		&NotificationModel{},
-		&AdminActionModel{},
-	}
-
+	// Проверяем наличие основных таблиц
+	tables := []string{"users", "events", "tags", "event_tags", "comments", "notifications"}
 	for _, table := range tables {
-		// Проверяем, существует ли таблица
-		if !db.Migrator().HasTable(table) {
-			log.Printf("Creating table for %T...", table)
-			if err := db.Migrator().CreateTable(table); err != nil {
-				log.Printf("Warning: Failed to create table for %T: %v", table, err)
-				// Продолжаем с другими таблицами даже если одна не создалась
-			}
+		if db.Migrator().HasTable(table) {
+			log.Printf("Table %s exists ✓", table)
 		} else {
-			// Таблица существует, добавляем недостающие колонки
-			log.Printf("Table for %T already exists, checking columns...", table)
-			if err := db.AutoMigrate(table); err != nil {
-				log.Printf("Warning: Failed to auto-migrate table for %T: %v", table, err)
-				// Продолжаем с другими таблицами даже если одна не мигрировалась
-			}
+			log.Printf("WARNING: Table %s does not exist", table)
 		}
 	}
 
-	log.Println("Database migration completed")
-	return nil // Все операции были логированы, возвращаем nil
+	log.Println("Database structure check completed")
 }

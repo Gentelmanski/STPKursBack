@@ -20,10 +20,10 @@ type Event struct {
 	CreatedAt         time.Time          `json:"created_at"`
 	UpdatedAt         time.Time          `json:"updated_at"`
 	ParticipantsCount int                `json:"participants_count"`
-	Tags              []Tag              `json:"tags"`
-	Media             []EventMedia       `json:"media"`
-	Participants      []EventParticipant `json:"participants"`
-	Comments          []Comment          `json:"comments"`
+	Tags              []Tag              `json:"tags" gorm:"-"`
+	Media             []EventMedia       `json:"media" gorm:"-"`
+	Participants      []EventParticipant `json:"participants" gorm:"-"`
+	Comments          []Comment          `json:"comments" gorm:"-"`
 }
 
 func (e *Event) IsFull() bool {

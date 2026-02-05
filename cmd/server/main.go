@@ -28,7 +28,9 @@ func main() {
 
 	// Простая проверка подключения (без изменения структуры)
 	log.Println("Verifying database connection...")
-	postgres.SafeMigrate(db)
+	if err := postgres.SafeMigratee(db); err != nil {
+		log.Printf("Warning: %v", err)
+	}
 
 	log.Println("Database ready")
 

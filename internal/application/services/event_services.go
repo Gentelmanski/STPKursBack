@@ -28,9 +28,6 @@ func NewEventService(eventRepo appInterfaces.EventRepository, userRepo appInterf
 }
 
 func (s *EventService) CreateEvent(ctx context.Context, req dto.CreateEventRequest, userID uint) (*dto.EventResponse, error) {
-	// Создаем PostGIS location string - УДАЛИЛИ ПЕРЕМЕННУЮ location, так как она не используется
-	// location := fmt.Sprintf("POINT(%f %f)", req.Longitude, req.Latitude)
-
 	event := &entities.Event{
 		Title:           req.Title,
 		Description:     req.Description,
@@ -48,10 +45,7 @@ func (s *EventService) CreateEvent(ctx context.Context, req dto.CreateEventReque
 		UpdatedAt:       time.Now(),
 	}
 
-	// Здесь в реальной реализации нужно было бы установить location в базу данных
-	// Но в нашем случае мы работаем с DTO, а location будет обрабатываться репозиторием
-
-	// Создаем теги для события
+	// Создаем теги отдельно
 	tags := make([]entities.Tag, len(req.Tags))
 	for i, tagName := range req.Tags {
 		tags[i] = entities.Tag{
@@ -62,12 +56,11 @@ func (s *EventService) CreateEvent(ctx context.Context, req dto.CreateEventReque
 	}
 	event.Tags = tags
 
-	// Сохраняем в репозитории
 	if err := s.eventRepo.Create(ctx, event); err != nil {
 		return nil, err
 	}
 
-	// Уведомляем админов
+	// Notify admins
 	admins, err := s.userRepo.GetAdmins(ctx)
 	if err == nil && len(admins) > 0 {
 		for _, admin := range admins {

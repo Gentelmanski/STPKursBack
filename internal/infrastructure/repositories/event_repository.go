@@ -25,43 +25,125 @@ func (r *EventRepository) Create(ctx context.Context, event *entities.Event) err
 
 func (r *EventRepository) FindByID(ctx context.Context, id uint) (*entities.Event, error) {
 	var event entities.Event
+
+	// Загружаем базовую информацию о событии
 	err := r.db.WithContext(ctx).
-		Preload("Creator").
-		Preload("Tags").
-		Preload("Media").
-		Preload("Comments", "parent_id IS NULL AND is_deleted = false").
-		Preload("Comments.User").
-		Preload("Comments.Replies", "is_deleted = false").
-		Preload("Comments.Replies.User").
-		First(&event, id).Error
+		Table("events").
+		Select("events.*, users.username, users.email, users.role, users.avatar_url").
+		Joins("LEFT JOIN users ON events.creator_id = users.id").
+		Where("events.id = ?", id).
+		First(&event).Error
+
 	if err != nil {
 		return nil, err
 	}
+
+	// Ручной расчет количества участников
+	var participantsCount int64
+	r.db.WithContext(ctx).Table("event_participants").
+		Where("event_id = ? AND status = 'going'", id).
+		Count(&participantsCount)
+	event.ParticipantsCount = int(participantsCount)
+
+	// Преобразуем координаты из PostGIS
+	var coords struct {
+		Latitude  float64
+		Longitude float64
+	}
+
+	r.db.WithContext(ctx).Raw(`
+		SELECT 
+			ST_Y(location::geometry) as latitude,
+			ST_X(location::geometry) as longitude 
+		FROM events WHERE id = ?
+	`, id).Scan(&coords)
+
+	event.Latitude = coords.Latitude
+	event.Longitude = coords.Longitude
+
 	return &event, nil
 }
 
 func (r *EventRepository) FindAll(ctx context.Context, filter map[string]interface{}) ([]entities.Event, error) {
 	var events []entities.Event
 
+	// Базовый запрос
 	query := r.db.WithContext(ctx).
-		Preload("Creator").
-		Preload("Tags").
-		Where("is_active = ?", true)
+		Table("events").
+		Select("events.*, users.username, users.email, users.role, users.avatar_url").
+		Joins("LEFT JOIN users ON events.creator_id = users.id").
+		Where("events.is_active = ?", true)
 
-	// Применяем фильтры
+	// Фильтры
 	if types, ok := filter["type"]; ok {
-		query = query.Where("type IN ?", types)
+		query = query.Where("events.type IN ?", types)
 	}
 	if date, ok := filter["date"]; ok {
 		if !date.(time.Time).IsZero() {
 			startOfDay := date.(time.Time).Truncate(24 * time.Hour)
 			endOfDay := startOfDay.Add(24 * time.Hour)
-			query = query.Where("event_date BETWEEN ? AND ?", startOfDay, endOfDay)
+			query = query.Where("events.event_date BETWEEN ? AND ?", startOfDay, endOfDay)
 		}
 	}
 
-	err := query.Order("created_at DESC").Find(&events).Error
-	return events, err
+	// Получаем события
+	err := query.Order("events.created_at DESC").Find(&events).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Для каждого события получаем дополнительные данные
+	for i := range events {
+		// Количество участников
+		var count int64
+		r.db.WithContext(ctx).Table("event_participants").
+			Where("event_id = ? AND status = 'going'", events[i].ID).
+			Count(&count)
+		events[i].ParticipantsCount = int(count)
+
+		// Координаты
+		var coords struct {
+			Latitude  float64
+			Longitude float64
+		}
+		r.db.WithContext(ctx).Raw(`
+			SELECT 
+				ST_Y(location::geometry) as latitude,
+				ST_X(location::geometry) as longitude 
+			FROM events WHERE id = ?
+		`, events[i].ID).Scan(&coords)
+
+		events[i].Latitude = coords.Latitude
+		events[i].Longitude = coords.Longitude
+	}
+
+	return events, nil
+}
+
+func (r *EventRepository) GetEventTags(ctx context.Context, eventID uint) ([]entities.Tag, error) {
+	var tags []entities.Tag
+
+	err := r.db.WithContext(ctx).
+		Table("tags").
+		Select("tags.*").
+		Joins("JOIN event_tags ON tags.id = event_tags.tag_id").
+		Where("event_tags.event_id = ?", eventID).
+		Find(&tags).Error
+
+	return tags, err
+}
+
+func (r *EventRepository) GetEventParticipants(ctx context.Context, eventID uint) ([]entities.EventParticipant, error) {
+	var participants []entities.EventParticipant
+
+	err := r.db.WithContext(ctx).
+		Table("event_participants").
+		Select("event_participants.*, users.username, users.email, users.role, users.avatar_url").
+		Joins("LEFT JOIN users ON event_participants.user_id = users.id").
+		Where("event_participants.event_id = ?", eventID).
+		Find(&participants).Error
+
+	return participants, err
 }
 
 func (r *EventRepository) Update(ctx context.Context, event *entities.Event) error {
