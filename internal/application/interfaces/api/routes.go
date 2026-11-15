@@ -45,6 +45,9 @@ func SetupRoutes(
 
 			// Event-specific routes
 			eventRoutes.GET("/:id", ctrls.Event.GetEventByID)
+			eventRoutes.POST("/:id/media", ctrls.EventMedia.Upload)
+			eventRoutes.GET("/:id/media", ctrls.EventMedia.List)
+			eventRoutes.DELETE("/:id/media/:mediaId", ctrls.EventMedia.Delete)
 			eventRoutes.PUT("/:id", ctrls.Event.UpdateEvent)
 			eventRoutes.DELETE("/:id", ctrls.Event.DeleteEvent)
 			eventRoutes.POST("/:id/participate", ctrls.Event.Participate)

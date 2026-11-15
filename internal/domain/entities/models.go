@@ -21,6 +21,7 @@ type EventMedia struct {
 	FileType   string    `json:"file_type"`
 	OrderIndex int       `json:"order_index"`
 	CreatedAt  time.Time `json:"created_at"`
+	UploadedAt time.Time `json:"uploaded_at"`
 }
 
 type EventParticipant struct {

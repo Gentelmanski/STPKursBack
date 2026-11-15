@@ -12,11 +12,14 @@ import (
 	"auth-system/internal/infrastructure/http"
 	"auth-system/internal/infrastructure/repositories"
 	"auth-system/internal/infrastructure/repositories/postgres"
+	"auth-system/internal/infrastructure/storage"
 	"auth-system/internal/pkg/utils"
 )
 
 // ЭТО ВАЖНО ДАННЫЕ АДМИНА msimonov781@gmail.com Qwezxc098
 // Данные пользователя Иван testmail@test.com  Qwezxc098
+// для входа на Silo http://localhost:9001 логин storageadmin пароль Qwezxc098
+
 func main() {
 	// Загрузка конфигурации
 	cfg := config.Load()
@@ -41,6 +44,11 @@ func main() {
 
 	// загрузка сервисов
 	svc := setupServices(repos, jwtUtil, passwordUtil)
+	objectStorage, err := storage.NewS3(cfg)
+	if err != nil {
+		log.Fatal("Failed to initialize S3 client")
+	}
+	svc.EventMedia = services.NewEventMediaService(repositories.NewEventMediaRepository(db), objectStorage)
 
 	// загрузка контролеров
 	ctrls := setupControllers(svc)
@@ -80,6 +88,7 @@ func setupServices(repos *repositories.Repositories, jwtUtil utils.JWTUtil, pass
 
 func setupControllers(services *services.Services) *controllers.Controllers {
 	return &controllers.Controllers{
+		EventMedia:   controllers.NewEventMediaController(services.EventMedia),
 		Auth:         controllers.NewAuthController(services.Auth),
 		Event:        controllers.NewEventController(services.Event),
 		Comment:      controllers.NewCommentController(services.Comment),
