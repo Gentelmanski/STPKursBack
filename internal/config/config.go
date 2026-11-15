@@ -12,7 +12,7 @@ type Config struct {
 
 func Load() *Config {
 	return &Config{
-		DatabaseURL: getEnv("DATABASE_URL", "host=localhost user=max password=123456 dbname=kurs port=5432 sslmode=disable"),
+		DatabaseURL: getEnv("DATABASE_URL", "host=localhost user=stpkurs_app password=Qwezxc098 dbname=kurs port=5433 sslmode=disable"),
 		ServerPort:  getEnv("SERVER_PORT", ":8080"),
 		JWTSecret:   getEnv("JWT_SECRET", "BpR0cOjcNNiskIZu9ZtS3Q3o3M2RzNEEAQIZVJFX5uC"),
 	}

@@ -15,6 +15,8 @@ import (
 	"auth-system/internal/pkg/utils"
 )
 
+// ЭТО ВАЖНО ДАННЫЕ АДМИНА msimonov781@gmail.com Qwezxc098
+// Данные пользователя Иван testmail@test.com  Qwezxc098
 func main() {
 	// Загрузка конфигурации
 	cfg := config.Load()
